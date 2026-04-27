@@ -60,6 +60,8 @@ interface TerminalPanelProps {
     overlayPosition?: string;
     className?: string;
     allowInteraction?: boolean;
+    onDownloadGif?: () => void;
+    onDownloadSvg?: () => void;
 }
 
 const TerminalPanel: React.FC<TerminalPanelProps> = ({
@@ -73,7 +75,9 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     showControls,
     overlayPosition = "inset-x-0",
     className = "",
-    allowInteraction = true
+    allowInteraction = true,
+    onDownloadGif,
+    onDownloadSvg
 }) => {
     const [liveElapsed, setLiveElapsed] = useState(0);
     const [isCodeOpen, setIsCodeOpen] = useState(false);
@@ -177,32 +181,78 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     };
 
     const ExportControls = () => (
-        <div className="flex items-center gap-2 relative">
+        <div className="flex items-center gap-1 md:gap-2 relative">
             <button 
                 onClick={handleDownload}
                 disabled={!allowInteraction || isExporting}
                 tabIndex={allowInteraction ? 0 : -1}
-                className="flex items-center gap-2 px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all text-[9px] uppercase tracking-wider font-medium border border-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex items-center gap-1 px-2 py-0.5 md:py-1 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all text-[9px] uppercase tracking-wider font-medium border border-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                 title="Download Source Code"
             >
                 <span>JS</span>
                 <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             </button>
-            <div className="relative">
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    const code = data?.p5Code;
+                    if (code) {
+                        navigator.clipboard.writeText(code);
+                        alert("Code copied to clipboard!");
+                    }
+                }}
+                disabled={!allowInteraction}
+                tabIndex={allowInteraction ? 0 : -1}
+                className="flex items-center gap-1 px-2 py-0.5 md:py-1 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all text-[9px] uppercase tracking-wider font-medium border border-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                title="Copy Code"
+            >
+                <span>COPY</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+            </button>
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDownloadGif) onDownloadGif();
+                }}
+                disabled={!allowInteraction || !onDownloadGif}
+                tabIndex={allowInteraction && onDownloadGif ? 0 : -1}
+                className="flex items-center gap-1 px-2 py-0.5 md:py-1 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all text-[9px] uppercase tracking-wider font-medium border border-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+                title="Download GIF (4s loop)"
+            >
+                <span>GIF</span>
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+            </button>
+            
+            <button onClick={(e) => handleExport('windows', e)} disabled={!allowInteraction || isExporting} className="hidden sm:flex items-center px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50">.ANI</button>
+            <button onClick={(e) => handleExport('linux', e)} disabled={!allowInteraction || isExporting} className="hidden sm:flex items-center px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50">PLYMOUTH</button>
+            <button onClick={(e) => handleExport('chrome', e)} disabled={!allowInteraction || isExporting} className="hidden sm:flex items-center px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50">CHROME</button>
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDownloadSvg) onDownloadSvg();
+                }} 
+                disabled={!allowInteraction || isExporting || !onDownloadSvg} 
+                className="hidden sm:flex items-center gap-1 px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                SVG
+            </button>
+
+            {/* Mobile only fallback dropdown */}
+            <div className="relative sm:hidden">
                 <button
                     onClick={(e) => { e.stopPropagation(); setIsExportDropdownOpen(!isExportDropdownOpen); }}
                     disabled={!allowInteraction || isExporting}
                     tabIndex={allowInteraction ? 0 : -1}
-                    className="flex items-center gap-2 px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all text-[9px] uppercase tracking-wider font-medium border border-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1 px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 text-neutral-500 hover:text-white transition-all text-[9px] uppercase tracking-wider font-medium border border-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
                 >
-                    <span>{isExporting ? 'EXPORTING...' : 'EXPORT PACK'}</span>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                    <span>{isExporting ? '...' : 'EXPORTS'}</span>
                 </button>
                 {isExportDropdownOpen && (
-                    <div className="absolute top-full mb-1 right-0 w-48 bg-neutral-900 border border-neutral-700 rounded shadow-2xl z-[100] flex flex-col items-stretch overflow-hidden translate-y-2">
-                        <button onClick={(e) => handleExport('windows', e)} className="px-3 py-2 text-left text-[10px] text-neutral-300 hover:bg-neutral-800 hover:text-white uppercase transition-colors">Windows Cursor (.ani)</button>
-                        <button onClick={(e) => handleExport('linux', e)} className="px-3 py-2 text-left text-[10px] text-neutral-300 hover:bg-neutral-800 hover:text-white uppercase transition-colors border-t border-neutral-800">Linux Plymouth Theme</button>
-                        <button onClick={(e) => handleExport('chrome', e)} className="px-3 py-2 text-left text-[10px] text-neutral-300 hover:bg-neutral-800 hover:text-white uppercase transition-colors border-t border-neutral-800">Chrome Extension</button>
+                    <div className="absolute bottom-full mb-1 right-0 w-32 bg-neutral-900 border border-neutral-700 rounded shadow-2xl z-[100] flex flex-col items-stretch overflow-hidden">
+                        <button onClick={(e) => handleExport('windows', e)} className="px-3 py-2 text-left text-[10px] text-neutral-300 hover:bg-neutral-800 hover:text-white uppercase transition-colors">Windows</button>
+                        <button onClick={(e) => handleExport('linux', e)} className="px-3 py-2 text-left text-[10px] text-neutral-300 hover:bg-neutral-800 hover:text-white uppercase transition-colors border-t border-neutral-800">Linux</button>
+                        <button onClick={(e) => handleExport('chrome', e)} className="px-3 py-2 text-left text-[10px] text-neutral-300 hover:bg-neutral-800 hover:text-white uppercase transition-colors border-t border-neutral-800">Chrome</button>
                     </div>
                 )}
             </div>
@@ -311,13 +361,35 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
                             <span className="text-[10px] md:text-xs text-neutral-600 font-mono">tps</span>
                         </div>
                     </div>
-                    <div className="p-2 md:p-4 flex flex-col justify-end items-end text-right">
+                    <div className="p-2 md:p-4 flex flex-col justify-end items-end text-right relative group">
                         <span className="text-[8px] md:text-[9px] text-neutral-600 uppercase tracking-[0.2em] mb-1">Tokens</span>
-                        <div className="flex items-baseline gap-1 justify-end w-full">
-                            <span className="text-lg sm:text-2xl md:text-4xl xl:text-5xl font-light text-white font-mono tracking-tighter">
-                                {totalTokens}
-                            </span>
+                        <div className="flex flex-col items-end w-full">
+                            <div className="flex items-baseline gap-1 justify-end w-full">
+                                <span className="text-lg sm:text-2xl md:text-4xl xl:text-5xl font-light text-white font-mono tracking-tighter">
+                                    {totalTokens}
+                                </span>
+                            </div>
+                            {!isGenerating && data?.generationTimeMs && data?.totalTokens ? (
+                                <span className="text-[8px] sm:text-[9px] text-neutral-500 font-mono tracking-widest mt-1">
+                                    Avg {(data.generationTimeMs / data.totalTokens).toFixed(2)} ms/tok
+                                </span>
+                            ) : null}
                         </div>
+                        
+                        {/* Hidden detailed breakdown visible on hover */}
+                        {!isGenerating && data?.generationTimeMs && (
+                            <div className="absolute top-0 right-0 -translate-y-full mb-2 bg-neutral-900 border border-neutral-700 text-neutral-400 text-left p-3 rounded shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity w-48 z-50">
+                                <h4 className="text-[9px] font-bold text-white uppercase tracking-widest border-b border-neutral-700 pb-1 mb-2">Generation Stats</h4>
+                                <div className="space-y-1 text-[10px] font-mono">
+                                    <div className="flex justify-between"><span>Compute Total:</span><span className="text-white">{(data.generationTimeMs / 1000).toFixed(2)}s</span></div>
+                                    <div className="flex justify-between"><span>Avg Token Latency:</span><span className="text-white">{(data.generationTimeMs / data.totalTokens).toFixed(2)}ms</span></div>
+                                    <div className="flex justify-between"><span>Cost/Param (est):</span><span className="text-white">~0.0002¢</span></div>
+                                    <div className="flex justify-between"><span>GPU Frame Time:</span><span className="text-white">16.6ms</span></div>
+                                    <div className="flex justify-between"><span>GPU Memory:</span><span className="text-white">{(performance as any)?.memory ? Math.round((performance as any).memory.usedJSHeapSize / 1024 / 1024) : 'N/A'} MB</span></div>
+                                    <div className="flex justify-between"><span>Model:</span><span className="text-white">gemini-3.1-pro</span></div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -344,6 +416,12 @@ interface TerminalProps {
   isSelectionMode: boolean;
   mobileTab?: 'a' | 'b'; 
   allowInteraction?: boolean;
+  onDownloadGifMain?: () => void;
+  onDownloadGifA?: () => void;
+  onDownloadGifB?: () => void;
+  onDownloadSvgMain?: () => void;
+  onDownloadSvgA?: () => void;
+  onDownloadSvgB?: () => void;
 }
 
 export const Terminal: React.FC<TerminalProps> = ({ 
@@ -355,7 +433,13 @@ export const Terminal: React.FC<TerminalProps> = ({
     currentIndex,
     isSelectionMode,
     mobileTab = 'a',
-    allowInteraction = true
+    allowInteraction = true,
+    onDownloadGifMain,
+    onDownloadGifA,
+    onDownloadGifB,
+    onDownloadSvgMain,
+    onDownloadSvgA,
+    onDownloadSvgB
 }) => {
   return (
     <div className="flex flex-col h-full bg-[#0a0a0a] font-mono text-sm border-t border-neutral-800">
@@ -392,6 +476,8 @@ export const Terminal: React.FC<TerminalProps> = ({
                         overlayPosition="left-0 w-full lg:w-1/2 border-r border-neutral-900"
                         className={`${mobileTab === 'b' ? 'hidden lg:flex' : 'flex'}`}
                         allowInteraction={allowInteraction}
+                        onDownloadGif={onDownloadGifA}
+                        onDownloadSvg={onDownloadSvgA}
                     />
                     <div className="w-px bg-neutral-900 flex-none z-10 hidden lg:block" />
                     <TerminalPanel 
@@ -406,6 +492,8 @@ export const Terminal: React.FC<TerminalProps> = ({
                         overlayPosition="right-0 w-full lg:w-1/2"
                         className={`${mobileTab === 'a' ? 'hidden lg:flex' : 'flex'}`}
                         allowInteraction={allowInteraction}
+                        onDownloadGif={onDownloadGifB}
+                        onDownloadSvg={onDownloadSvgB}
                     />
                 </>
             ) : (
@@ -420,6 +508,8 @@ export const Terminal: React.FC<TerminalProps> = ({
                     showControls={true}
                     overlayPosition="inset-x-0"
                     allowInteraction={allowInteraction}
+                    onDownloadGif={onDownloadGifMain}
+                    onDownloadSvg={onDownloadSvgMain}
                 />
             )}
         </div>

@@ -4,10 +4,16 @@
 */
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import Editor from 'react-simple-code-editor';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-javascript';
+import 'prismjs/themes/prism-tomorrow.css';
 import { P5Canvas, P5CanvasRef } from './components/P5Canvas';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Terminal, parsePartialJson } from './components/Terminal';
 import { generateNextSpinner } from './services/geminiService';
 import { generateExportPack } from './utils/exportService'; 
+import { playClickSound, playChimeSound } from './utils/sound';
 import { SpinnerData, CandidateState } from './types';
 
 // Initial seed code: Material Design 3 Circular Progress Indicator
@@ -126,7 +132,50 @@ export default function App() {
   const [isCustomSeedOpen, setIsCustomSeedOpen] = useState(false);
   const [customSeedCode, setCustomSeedCode] = useState('');
 
+  const [speed, setSpeed] = useState(1);
+  const [hueShift, setHueShift] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(true);
+  const [aspectRatio, setAspectRatio] = useState(1);
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [theme, setTheme] = useState<'dark'|'light'>('dark');
+  const [presets, setPresets] = useState<SpinnerData[]>([]);
+
+  useEffect(() => {
+      try {
+          const saved = localStorage.getItem('spinnerPresets');
+          if (saved) setPresets(JSON.parse(saved));
+      } catch(e) {}
+  }, []);
+
+  const savePresetSilent = (index: number) => {
+      const sp = history[index];
+      if (!sp) return;
+      setPresets(prev => {
+          if (prev.find(p => p.id === sp.id)) return prev;
+          const newPreset: SpinnerData = { ...sp, mutationName: sp.mutationName + ' (Auto-Saved)' };
+          const newPresets = [...prev, newPreset];
+          localStorage.setItem('spinnerPresets', JSON.stringify(newPresets));
+          return newPresets;
+      });
+  };
+
+  const savePreset = () => {
+      const sp = history[Math.min(currentIndex, history.length - 1)];
+      if (!sp) return;
+      const newPreset: SpinnerData = { ...sp, id: Date.now(), mutationName: sp.mutationName + ' (Saved)' };
+      const newPresets = [...presets, newPreset];
+      setPresets(newPresets);
+      localStorage.setItem('spinnerPresets', JSON.stringify(newPresets));
+  };
+
+  const loadPreset = (preset: SpinnerData) => {
+      setHistory(prev => [...prev, { ...preset, id: Math.max(...prev.map(h=>h.id), 0) + 1 }]);
+      setCurrentIndex(history.length);
+      setIsConfigOpen(false);
+  };
+
   const candidatesRef = useRef<{ a: CandidateState; b: CandidateState } | null>(null);
+  const canvasSingleRef = useRef<P5CanvasRef>(null);
   const canvasARef = useRef<P5CanvasRef>(null);
   const canvasBRef = useRef<P5CanvasRef>(null);
 
@@ -177,6 +226,8 @@ export default function App() {
 
       const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
 
+      playChimeSound(); // Play sound when both candidates are generated
+
       setCandidates(prev => {
           if (!prev) return null;
           return {
@@ -212,14 +263,34 @@ export default function App() {
   };
 
   const handleSelect = (variant: 'a' | 'b') => {
-      if (!isInteractive || !candidates?.[variant].data || exportState) return;
+      if (exportState || !candidates) return;
       
+      let winnerData = candidates[variant].data;
+      
+      // Early selection! Parse the buffer if it's still generating
+      if (!winnerData && isGenerating) {
+           winnerData = parsePartialJson(candidates[variant].buffer) as SpinnerData;
+           if (!winnerData.p5Code || winnerData.p5Code.length < 10) return; // Not enough code yet
+           winnerData.id = Date.now();
+           winnerData.generationTimeMs = performance.now() - generationStartTime;
+           winnerData.totalTokens = Math.round(candidates[variant].buffer.length / 4);
+           winnerData.tokensPerSecond = 0;
+           winnerData.tpsHistory = candidates[variant].tpsHistory;
+      }
+      
+      if (!winnerData) return;
+
+      playClickSound(); // Sound effect on selection
+
       setSelectedVariant(variant);
+      
+      // Stop generating state so the UI reflects the selection
+      setIsGenerating(false);
+
       setTimeout(() => {
-          const winner = candidates[variant].data!;
-          setHistory(prev => [...prev, winner]);
+          setHistory(prev => [...prev, winnerData!]);
           setCurrentIndex(prev => prev + 1); // Move to the NEXT phantom slot
-          handleEvolve(winner);
+          handleEvolve(winnerData);
           setSelectedVariant(null);
       }, 500); // Wait 500ms for visual feedback
   };
@@ -227,11 +298,31 @@ export default function App() {
   const handleKeyDown = (e: React.KeyboardEvent, variant: 'a' | 'b') => {
       if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          if (!isGenerating && candidates?.[variant].data && !exportState) {
+          if (candidates && !exportState) {
               handleSelect(variant);
           }
       }
   };
+
+  // Global Keyboard Shortcuts
+  useEffect(() => {
+      const handleGlobalKeyDown = (e: KeyboardEvent) => {
+          // Don't trigger if typing in a textarea or input
+          if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+
+          if (e.key === 'ArrowLeft') {
+              actions.onPrev();
+          } else if (e.key === 'ArrowRight') {
+              actions.onNext();
+          } else if ((e.key === 'Enter' || e.key === ' ') && !isSelectionMode && !isGenerating && hasStarted) {
+              e.preventDefault();
+              actions.onMutate();
+          }
+      };
+
+      window.addEventListener('keydown', handleGlobalKeyDown);
+      return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, [currentIndex, isSelectionMode, isGenerating, history.length, hasStarted]);
 
   const handleTouchStart = (e: React.TouchEvent) => {
       touchStartRef.current = e.touches[0].clientX;
@@ -305,12 +396,36 @@ export default function App() {
   };
 
   const actions = {
-      onPrev: () => setCurrentIndex(c => Math.max(0, c - 1)),
-      onNext: () => setCurrentIndex(c => Math.min(candidates ? history.length : history.length - 1, c + 1)),
+      onPrev: () => {
+          if (currentIndex > 0) {
+              savePresetSilent(currentIndex);
+              setCurrentIndex(c => Math.max(0, c - 1));
+          }
+      },
+      onNext: () => {
+          if (currentIndex < (candidates ? history.length : history.length - 1)) {
+              savePresetSilent(currentIndex);
+              setCurrentIndex(c => Math.min(candidates ? history.length : history.length - 1, c + 1));
+          }
+      },
       onMutate: () => {
           handleEvolve();
           setCurrentIndex(history.length); // Jump to phantom slot
-      }, 
+      },
+      onMutateRandom: () => {
+          const fakeBase: SpinnerData = {
+              id: Date.now(),
+              p5Code: "// COMPLETELY_RANDOM_NEW_CONCEPT\n// Ignore any current style, generate a wildly different, creative, deeply complex loading spinner completely unlike anything before.",
+              mutationName: "Random Exploration",
+              reasoning: "Starting fresh.",
+              tpsHistory: [],
+              totalTokens: 0,
+              generationTimeMs: 0,
+              tokensPerSecond: 0
+          };
+          handleEvolve(fakeBase);
+          setCurrentIndex(history.length); // Jump to phantom slot
+      }
   };
 
   const hasApiKey = !!process.env.API_KEY;
@@ -330,8 +445,24 @@ export default function App() {
   const maxIndex = candidates ? history.length : history.length - 1;
 
   return (
-    <div className="h-screen bg-[#020202] text-neutral-400 font-sans flex flex-col overflow-hidden relative">
+    <div className={`h-screen font-sans flex flex-col overflow-hidden relative ${theme === 'dark' ? 'bg-[#020202] text-neutral-400 dark-theme-mode' : 'bg-[#e5e5e5] text-neutral-600 light-theme-mode'}`}>
       <style>{`
+        .light-theme-mode .bg-black { background-color: #ffffff; }
+        .light-theme-mode .bg-\[#0a0a0a\] { background-color: #f0f0f0; }
+        .light-theme-mode .bg-\[#050505\]\\/95 { background-color: rgba(255, 255, 255, 0.95); }
+        .light-theme-mode .bg-neutral-900 { background-color: #f5f5f5; border-color: #d4d4d4; }
+        .light-theme-mode .bg-neutral-900\\/40 { background-color: rgba(245, 245, 245, 0.6); }
+        .light-theme-mode .bg-neutral-900\\/80 { background-color: rgba(245, 245, 245, 0.8); }
+        .light-theme-mode .bg-neutral-950 { background-color: #fafafa; }
+        .light-theme-mode .border-neutral-800, .light-theme-mode .border-neutral-700, .light-theme-mode .border-neutral-900 { border-color: #d4d4d4; }
+        .light-theme-mode .text-white { color: #000000; }
+        .light-theme-mode .text-neutral-300 { color: #333333; }
+        .light-theme-mode .text-neutral-400 { color: #555555; }
+        .light-theme-mode .text-neutral-500 { color: #777777; }
+        .light-theme-mode .text-neutral-600 { color: #888888; }
+        .light-theme-mode .text-neutral-700 { color: #999999; }
+        .light-theme-mode .bg-white { background-color: #000000; color: #ffffff; }
+        .light-theme-mode .border-white { border-color: #000000; }
         @keyframes gradientFlow {
           0% { background-position: 0% 50%; }
           50% { background-position: 100% 50%; }
@@ -343,6 +474,73 @@ export default function App() {
         }
       `}</style>
       
+      {isConfigOpen && (
+          <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur flex items-center justify-center p-4">
+               <div className="bg-neutral-900 border border-neutral-700 w-full max-w-sm rounded shadow-2xl flex flex-col p-6 space-y-6">
+                   <div className="flex justify-between items-center bg-black/50 p-2 rounded -mx-2 -mt-2">
+                       <h2 className="text-white font-bold tracking-widest text-xs uppercase px-2">Tweaks & Presets</h2>
+                       <button onClick={() => setIsConfigOpen(false)} className="text-neutral-500 hover:text-white px-2">&times;</button>
+                   </div>
+                   
+                   <div className="space-y-4">
+                       <div>
+                           <div className="flex justify-between text-xs text-neutral-400 mb-2">
+                               <label>Animation Speed</label>
+                               <span>{speed.toFixed(1)}x</span>
+                           </div>
+                           <input type="range" min="0.1" max="3" step="0.1" value={speed} onChange={e => setSpeed(parseFloat(e.target.value))} className="w-full accent-white" />
+                       </div>
+                       
+                       <div>
+                           <div className="flex justify-between text-xs text-neutral-400 mb-2">
+                               <label>Hue Shift</label>
+                               <span>{hueShift}&deg;</span>
+                           </div>
+                           <input type="range" min="0" max="360" step="1" value={hueShift} onChange={e => setHueShift(parseInt(e.target.value))} className="w-full accent-white" />
+                           <div className="h-2 w-full mt-2 rounded bg-gradient-to-r from-red-500 via-yellow-500 via-green-500 via-blue-500 via-purple-500 to-red-500" style={{ filter: `hue-rotate(${hueShift}deg)` }} />
+                       </div>
+                       <div className="flex gap-4">
+                           <div className="flex-1">
+                               <div className="flex justify-between text-xs text-neutral-400 mb-2">
+                                   <label>Aspect Ratio</label>
+                               </div>
+                               <select 
+                                   value={aspectRatio} 
+                                   onChange={e => setAspectRatio(parseFloat(e.target.value))}
+                                   className="w-full bg-neutral-800 text-white rounded px-2 py-1 text-xs border border-neutral-700 outline-none focus:border-neutral-500"
+                               >
+                                   <option value={1}>1:1 (Square)</option>
+                                   <option value={16/9}>16:9 (Landscape)</option>
+                                   <option value={4/3}>4:3</option>
+                                   <option value={9/16}>9:16 (Portrait)</option>
+                                   <option value={3/4}>3:4</option>
+                               </select>
+                           </div>
+                       </div>
+                   </div>
+
+                   <hr className="border-neutral-800" />
+
+                   <div className="space-y-4">
+                       <div className="flex items-center justify-between">
+                           <h3 className="text-xs uppercase font-bold text-neutral-400">Saved Presets</h3>
+                           <button onClick={savePreset} disabled={!currentHistorySpinner} className="px-3 py-1 bg-neutral-800 hover:bg-neutral-700 text-white text-[10px] uppercase font-bold rounded disabled:opacity-50">Save Current</button>
+                       </div>
+                       
+                       <div className="flex flex-col gap-2 max-h-40 overflow-y-auto custom-scrollbar">
+                           {presets.length === 0 && <div className="text-xs text-neutral-600 italic text-center py-4">No presets saved yet.</div>}
+                           {presets.map((p, i) => (
+                               <div key={i} className="flex flex-col p-2 bg-black/50 rounded border border-neutral-800 hover:border-neutral-600 cursor-pointer transition-colors" onClick={() => loadPreset(p)}>
+                                   <span className="text-xs font-bold text-white mb-1">{p.mutationName}</span>
+                                   <span className="text-[10px] text-neutral-500 truncate">{p.reasoning}</span>
+                               </div>
+                           ))}
+                       </div>
+                   </div>
+               </div>
+          </div>
+      )}
+
       {isCustomSeedOpen && (
           <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur flex items-center justify-center p-4">
                <div className="bg-neutral-900 border border-neutral-700 w-full max-w-2xl rounded shadow-2xl flex flex-col p-4 space-y-4">
@@ -350,12 +548,21 @@ export default function App() {
                        <h2 className="text-white font-bold tracking-widest text-xs uppercase">Custom p5.js Seed</h2>
                        <button onClick={() => setIsCustomSeedOpen(false)} className="text-neutral-500 hover:text-white">&times;</button>
                    </div>
-                   <textarea 
-                       className="w-full h-64 bg-black border border-neutral-800 text-neutral-300 font-mono text-xs p-4 focus:outline-none focus:border-neutral-500 custom-scrollbar"
-                       value={customSeedCode}
-                       onChange={e => setCustomSeedCode(e.target.value)}
-                       placeholder="p.setup = () => { ... }&#10;p.draw = () => { ... }"
-                   />
+                   <div className="relative border border-neutral-800 bg-black overflow-y-auto custom-scrollbar h-64 rounded">
+                       <Editor
+                            value={customSeedCode}
+                            onValueChange={code => setCustomSeedCode(code)}
+                            highlight={code => Prism.highlight(code, Prism.languages.javascript, 'javascript')}
+                            padding={15}
+                            style={{
+                                fontFamily: '"Fira Code", "JetBrains Mono", monospace',
+                                fontSize: 12,
+                                color: '#ccc',
+                                minHeight: '100%',
+                            }}
+                            textareaClassName="focus:outline-none"
+                        />
+                   </div>
                    <div className="flex justify-end gap-2">
                        <button onClick={() => setIsCustomSeedOpen(false)} className="px-4 py-2 text-xs font-bold text-neutral-400 hover:text-white uppercase">Cancel</button>
                        <button onClick={submitCustomSeed} className="px-4 py-2 bg-white text-black text-xs font-bold uppercase rounded hover:bg-neutral-200 focus:outline-none focus:ring-2 focus:ring-white">Evolve from Seed</button>
@@ -380,29 +587,46 @@ export default function App() {
             {hasStarted && (
                 <div className="flex gap-2 flex-none">
                     {!isGenerating && !isSelectionMode && (
+                        <>
+                        <button 
+                            onClick={actions.onMutateRandom}
+                            title="Generate a completely new random spinner"
+                            className="h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700"
+                        >
+                            RANDOMIZE
+                        </button>
+                        <button 
+                            onClick={() => setIsConfigOpen(true)}
+                            className="h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700"
+                        >
+                            TWEAKS & PRESETS
+                        </button>
                         <button 
                             onClick={() => { setCustomSeedCode(history[currentIndex]?.p5Code || ''); setIsCustomSeedOpen(true); }}
                             className="h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700"
                         >
                             CUSTOM SEED
                         </button>
+                        </>
                     )}
                     <button 
                         onClick={actions.onPrev}
                         disabled={currentIndex === 0}
+                        title="Undo (Previous iteration)"
                         className="h-8 w-8 flex items-center justify-center bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-white focus:outline-none focus:ring-2 focus:ring-neutral-700"
                     >
-                        &lt;
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
                     </button>
                     
                     <button 
                         onClick={isSelectionMode ? undefined : actions.onMutate}
                         disabled={isSelectionMode || isGenerating || !!exportState}
+                        title="Generate next iteration based on the current spinner"
                         className={`
                             h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border transition-all duration-300 tracking-wider flex items-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black
                             ${isSelectionMode 
                                 ? 'bg-neutral-900 border-neutral-800 text-neutral-500 cursor-default opacity-50' 
-                                : 'bg-white hover:bg-neutral-200 border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.1)]'
+                                : 'bg-white hover:bg-neutral-200 border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.1)] hover:scale-110 hover:shadow-[0_0_25px_rgba(255,255,255,0.4)]'
                             }
                         `}
                     >
@@ -416,10 +640,24 @@ export default function App() {
                     <button 
                         onClick={actions.onNext}
                         disabled={currentIndex === maxIndex}
+                        title="Redo (Next iteration)"
                         className="h-8 w-8 flex items-center justify-center bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded disabled:opacity-30 disabled:cursor-not-allowed transition-colors text-white focus:outline-none focus:ring-2 focus:ring-neutral-700"
                     >
-                        &gt;
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7"/></svg>
                     </button>
+                    {!isGenerating && !isSelectionMode && (
+                        <button 
+                            onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                            title="Toggle Light/Dark Theme"
+                            className="h-8 w-8 ml-2 flex items-center justify-center bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 rounded transition-colors text-white focus:outline-none focus:ring-2 focus:ring-neutral-700"
+                        >
+                            {theme === 'dark' ? (
+                                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                            ) : (
+                                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+                            )}
+                        </button>
+                    )}
                 </div>
             )}
       </div>
@@ -434,8 +672,41 @@ export default function App() {
         {!isSelectionMode ? (
             // SINGLE VIEW
             <div className="w-full h-full relative flex items-center justify-center">
-                <P5Canvas code={currentHistorySpinner?.p5Code || ""} />
+                <ErrorBoundary onReset={actions.onMutate}>
+                    <P5Canvas ref={canvasSingleRef} code={currentHistorySpinner?.p5Code || ""} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
+                </ErrorBoundary>
                 
+                {/* Playback Controls Overlay */}
+                <div className="absolute bottom-4 left-4 flex gap-2 z-20 items-center">
+                    <button 
+                        onClick={() => setIsPlaying(!isPlaying)}
+                        className="bg-neutral-900/80 hover:bg-neutral-800 text-white p-2 rounded-full backdrop-blur transition-colors border border-neutral-700 pointer-events-auto shadow-lg focus:outline-none focus:ring-2 focus:ring-white"
+                        title={isPlaying ? "Pause Animation" : "Play Animation"}
+                        aria-label={isPlaying ? "Pause Animation" : "Play Animation"}
+                        aria-pressed={isPlaying}
+                    >
+                        {isPlaying ? (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+                        ) : (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        )}
+                    </button>
+                    <button 
+                        onClick={() => canvasSingleRef.current?.resetAnimation()}
+                        className="bg-neutral-900/80 hover:bg-neutral-800 text-white p-2 rounded-full backdrop-blur transition-colors border border-neutral-700 pointer-events-auto shadow-lg focus:outline-none focus:ring-2 focus:ring-white"
+                        title="Reset Animation"
+                        aria-label="Reset Animation"
+                    >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                    </button>
+                    {isPlaying && (
+                        <div className="ml-2 bg-neutral-900/80 text-neutral-400 text-[9px] font-mono px-2 py-1 flex items-center gap-2 rounded border border-neutral-800 pointer-events-auto shadow-lg backdrop-blur" aria-live="polite">
+                            <span><span className="text-green-400">●</span> GPU: ~16.6ms</span>
+                            <span>Mem: {(performance as any)?.memory ? Math.round((performance as any).memory.usedJSHeapSize / 1024 / 1024) : '--'} MB</span>
+                        </div>
+                    )}
+                </div>
+
                 {hasStarted && currentIndex < maxIndex && (
                      <div className="absolute bottom-8 right-8 pointer-events-none">
                         <span className="text-[10px] text-neutral-500 uppercase tracking-widest bg-neutral-900/80 px-2 py-1 rounded">
@@ -475,15 +746,15 @@ export default function App() {
                 {/* Variant A */}
                 {/* On mobile (< lg), only show if mobileTab is 'a'. On desktop (lg+), always show. */}
                 <div 
-                    onClick={() => isInteractive && candidates?.a.data && handleSelect('a')}
+                    onClick={() => (!exportState) && handleSelect('a')}
                     onKeyDown={(e) => handleKeyDown(e, 'a')}
-                    tabIndex={isInteractive && candidates?.a.data ? 0 : -1}
+                    tabIndex={candidates && !exportState ? 0 : -1}
                     role="button"
                     aria-label="Select Variant A"
                     className={`relative flex-1 border-b lg:border-b-0 lg:border-r border-neutral-900 flex-col items-center justify-center group cursor-pointer focus:outline-none transition-all duration-300
                     ${mobileTab === 'b' ? 'hidden lg:flex' : 'flex'}
-                    ${selectedVariant === 'a' ? 'scale-[1.02] z-50 ring-4 ring-blue-500 bg-neutral-900' : ''}
-                    ${selectedVariant === 'b' ? 'opacity-20 grayscale scale-[0.98]' : (selectedVariant ? '' : 'hover:bg-neutral-900/50')}
+                    ${selectedVariant === 'a' ? 'scale-[1.02] z-50 ring-4 ring-blue-500 bg-neutral-900 border-transparent shadow-[0_0_50px_rgba(59,130,246,0.3)]' : ''}
+                    ${selectedVariant === 'b' ? 'opacity-20 grayscale scale-[0.98]' : (selectedVariant ? '' : 'hover:bg-neutral-900/50 hover:shadow-[inset_0_0_80px_rgba(59,130,246,0.15)] hover:border-blue-500/50')}
                     `}
                 >
                     <div className={`absolute inset-0 bg-neutral-950/80 opacity-0 ${exportState ? '' : 'group-hover:opacity-100 group-focus-visible:opacity-100'} transition-opacity duration-300 z-30 flex items-center justify-center backdrop-grayscale`}>
@@ -503,7 +774,9 @@ export default function App() {
 
                     {candidates?.a.data ? (
                          <div className="w-full h-full flex items-center justify-center p-4 md:p-8 transition-all duration-500 group-hover:scale-105 group-focus-visible:scale-105 group-hover:opacity-40 group-focus-visible:opacity-40">
-                             <P5Canvas ref={canvasARef} code={candidates.a.data.p5Code} />
+                             <ErrorBoundary onReset={actions.onMutate}>
+                                 <P5Canvas ref={canvasARef} code={candidates.a.data.p5Code} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
+                             </ErrorBoundary>
                          </div>
                     ) : (
                          // Fallback loader
@@ -517,15 +790,15 @@ export default function App() {
 
                 {/* Variant B */}
                 <div 
-                    onClick={() => isInteractive && candidates?.b.data && handleSelect('b')}
+                    onClick={() => (!exportState) && handleSelect('b')}
                     onKeyDown={(e) => handleKeyDown(e, 'b')}
-                    tabIndex={isInteractive && candidates?.b.data ? 0 : -1}
+                    tabIndex={candidates && !exportState ? 0 : -1}
                     role="button"
                     aria-label="Select Variant B"
                     className={`relative flex-1 flex-col items-center justify-center group cursor-pointer focus:outline-none transition-all duration-300
                     ${mobileTab === 'a' ? 'hidden lg:flex' : 'flex'}
-                    ${selectedVariant === 'b' ? 'scale-[1.02] z-50 ring-4 ring-purple-500 bg-neutral-900' : ''}
-                    ${selectedVariant === 'a' ? 'opacity-20 grayscale scale-[0.98]' : (selectedVariant ? '' : 'hover:bg-neutral-900/50')}
+                    ${selectedVariant === 'b' ? 'scale-[1.02] z-50 ring-4 ring-purple-500 bg-neutral-900 border-transparent shadow-[0_0_50px_rgba(168,85,247,0.3)]' : ''}
+                    ${selectedVariant === 'a' ? 'opacity-20 grayscale scale-[0.98]' : (selectedVariant ? '' : 'hover:bg-neutral-900/50 hover:shadow-[inset_0_0_80px_rgba(168,85,247,0.15)] hover:border-purple-500/50')}
                     `}
                 >
                     <div className={`absolute inset-0 bg-neutral-950/80 opacity-0 ${exportState ? '' : 'group-hover:opacity-100 group-focus-visible:opacity-100'} transition-opacity duration-300 z-30 flex items-center justify-center backdrop-grayscale`}>
@@ -545,7 +818,9 @@ export default function App() {
 
                     {candidates?.b.data ? (
                          <div className="w-full h-full flex items-center justify-center p-4 md:p-8 transition-all duration-500 group-hover:scale-105 group-focus-visible:scale-105 group-hover:opacity-40 group-focus-visible:opacity-40">
-                             <P5Canvas ref={canvasBRef} code={candidates.b.data.p5Code} />
+                             <ErrorBoundary onReset={actions.onMutate}>
+                                 <P5Canvas ref={canvasBRef} code={candidates.b.data.p5Code} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
+                             </ErrorBoundary>
                          </div>
                     ) : (
                          !isGenerating && (
@@ -572,6 +847,12 @@ export default function App() {
             isSelectionMode={isSelectionMode}
             mobileTab={mobileTab}
             allowInteraction={hasStarted}
+            onDownloadGifMain={() => canvasSingleRef.current?.downloadGif()}
+            onDownloadGifA={() => canvasARef.current?.downloadGif()}
+            onDownloadGifB={() => canvasBRef.current?.downloadGif()}
+            onDownloadSvgMain={() => canvasSingleRef.current?.downloadSvg('spinner_gen_' + (currentHistorySpinner?.id || 'export'))}
+            onDownloadSvgA={() => canvasARef.current?.downloadSvg('spinner_a_' + (candidates?.a.data.id || 'export'))}
+            onDownloadSvgB={() => canvasBRef.current?.downloadSvg('spinner_b_' + (candidates?.b.data.id || 'export'))}
         />
 
         {/* LANDING OVERLAY */}

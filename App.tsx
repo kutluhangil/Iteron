@@ -11,6 +11,8 @@ import 'prismjs/themes/prism-tomorrow.css';
 import { P5Canvas, P5CanvasRef } from './components/P5Canvas';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { Terminal, parsePartialJson } from './components/Terminal';
+import { ExploreGallery } from './components/ExploreGallery';
+import { TreeVisualizer } from './components/TreeVisualizer';
 import { generateNextSpinner } from './services/geminiService';
 import { generateExportPack } from './utils/exportService'; 
 import { playClickSound, playChimeSound } from './utils/sound';
@@ -130,7 +132,12 @@ export default function App() {
   const touchStartRef = useRef<number>(0);
   
   const [isCustomSeedOpen, setIsCustomSeedOpen] = useState(false);
+  const [isExploreOpen, setIsExploreOpen] = useState(false);
+  const [isTreeOpen, setIsTreeOpen] = useState(false);
   const [customSeedCode, setCustomSeedCode] = useState('');
+  const [codeExportStatus, setCodeExportStatus] = useState<string | null>(null);
+
+  const [activeSeedId, setActiveSeedId] = useState<number | undefined>(undefined);
 
   const [speed, setSpeed] = useState(1);
   const [hueShift, setHueShift] = useState(0);
@@ -138,7 +145,33 @@ export default function App() {
   const [aspectRatio, setAspectRatio] = useState(1);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [theme, setTheme] = useState<'dark'|'light'>('dark');
+  const [userPrompt, setUserPrompt] = useState('');
   const [presets, setPresets] = useState<SpinnerData[]>([]);
+  const [micEnabled, setMicEnabled] = useState(false);
+
+  const toggleMic = async () => {
+    if (!micEnabled) {
+      if (!(window as any).p5AudioMic) {
+        if ((window as any).p5 && (window as any).p5.prototype && (window as any).p5.prototype.userStartAudio) {
+           await (window as any).p5.prototype.userStartAudio();
+           (window as any).p5AudioMic = new (window as any).p5.AudioIn();
+           (window as any).p5AudioMic.start();
+        } else {
+           alert("p5.sound is still loading or unavailable.");
+           return;
+        }
+      } else {
+        await (window as any).p5.prototype.userStartAudio();
+      }
+      setMicEnabled(true);
+    } else {
+       if ((window as any).p5AudioMic) {
+           (window as any).p5AudioMic.stop();
+           delete (window as any).p5AudioMic;
+       }
+       setMicEnabled(false);
+    }
+  };
 
   useEffect(() => {
       try {
@@ -202,7 +235,7 @@ export default function App() {
       }
   }, [candidates]);
 
-  const handleEvolve = async (seedOverride?: SpinnerData) => {
+  const handleEvolve = async (seedOverride?: SpinnerData, promptOverride?: string) => {
     if (isGenerating) return;
 
     setIsGenerating(true);
@@ -216,13 +249,14 @@ export default function App() {
     setCandidates(newCandidates);
     candidatesRef.current = newCandidates;
 
-    const seedSpinner = seedOverride || history[history.length - 1];
+    const seedSpinner = seedOverride !== undefined ? seedOverride : history[currentIndex];
     const seedCode = seedSpinner ? seedSpinner.p5Code : null;
+    setActiveSeedId(seedSpinner?.id);
     const nextId = (Math.max(...history.map(h => h.id), seedSpinner?.id || 0)) + 1;
 
     try {
-      const promiseA = generateNextSpinner(seedCode, nextId, (text) => updateCandidateStream('a', text));
-      const promiseB = generateNextSpinner(seedCode, nextId, (text) => updateCandidateStream('b', text));
+      const promiseA = generateNextSpinner(seedCode, nextId, (text) => updateCandidateStream('a', text), promptOverride);
+      const promiseB = generateNextSpinner(seedCode, nextId, (text) => updateCandidateStream('b', text), promptOverride);
 
       const [resultA, resultB] = await Promise.all([promiseA, promiseB]);
 
@@ -256,6 +290,52 @@ export default function App() {
     });
   };
 
+  const downloadTextFile = (text: string, filename: string) => {
+      const element = document.createElement("a");
+      const file = new Blob([text], {type: 'text/plain'});
+      element.href = URL.createObjectURL(file);
+      element.download = filename;
+      document.body.appendChild(element); // Required for this to work in FireFox
+      element.click();
+      element.remove();
+  };
+
+  const handleExportCode = async (format: 'react' | 'css' | 'lottie', variant?: 'main' | 'a' | 'b') => {
+      let spinner: SpinnerData | undefined;
+      
+      if (variant === 'main') {
+          spinner = history[currentIndex];
+      } else if (variant === 'a' || variant === 'b') {
+          if (candidates) {
+              spinner = candidates[variant].data || undefined;
+          }
+      }
+      
+      if (!spinner) return;
+      const codeKey = format === 'react' ? 'reactCode' : format === 'css' ? 'cssCode' : 'lottieCode';
+      const fileName = format === 'react' ? 'Spinner.tsx' : format === 'css' ? 'spinner.css' : 'spinner-lottie.json';
+      
+      if (spinner[codeKey]) {
+          // already cached, download
+          downloadTextFile(spinner[codeKey]!, fileName);
+          return;
+      }
+
+      setCodeExportStatus(`Generating ${format.toUpperCase()}...`);
+      try {
+          const generatedCode = await convertSpinnerFormat(spinner.p5Code, format, (text) => {
+              // we don't display stream for now, just wait
+          });
+          spinner[codeKey] = generatedCode;
+          downloadTextFile(generatedCode, fileName);
+      } catch (err) {
+          console.error(err);
+          alert(`Failed to generate ${format.toUpperCase()}.`);
+      } finally {
+          setCodeExportStatus(null);
+      }
+  };
+
   const handleStart = () => {
       setHasStarted(true);
       handleEvolve();
@@ -272,6 +352,7 @@ export default function App() {
            winnerData = parsePartialJson(candidates[variant].buffer) as SpinnerData;
            if (!winnerData.p5Code || winnerData.p5Code.length < 10) return; // Not enough code yet
            winnerData.id = Date.now();
+           winnerData.parentId = activeSeedId;
            winnerData.generationTimeMs = performance.now() - generationStartTime;
            winnerData.totalTokens = Math.round(candidates[variant].buffer.length / 4);
            winnerData.tokensPerSecond = 0;
@@ -279,6 +360,7 @@ export default function App() {
       }
       
       if (!winnerData) return;
+      winnerData.parentId = activeSeedId;
 
       playClickSound(); // Sound effect on selection
 
@@ -409,7 +491,8 @@ export default function App() {
           }
       },
       onMutate: () => {
-          handleEvolve();
+          handleEvolve(undefined, userPrompt);
+          setUserPrompt('');
           setCurrentIndex(history.length); // Jump to phantom slot
       },
       onMutateRandom: () => {
@@ -474,6 +557,27 @@ export default function App() {
         }
       `}</style>
       
+      {isExploreOpen && (
+          <ExploreGallery 
+             onClose={() => setIsExploreOpen(false)}
+             onLoad={(spinner) => {
+                 setHistory(prev => [...prev, spinner]);
+                 setCurrentIndex(history.length); // will be the new item
+                 handleEvolve(spinner);
+             }}
+             currentSpinner={currentHistorySpinner}
+          />
+      )}
+
+      {isTreeOpen && (
+          <TreeVisualizer 
+             history={history}
+             currentIndex={currentIndex}
+             onSelectNode={(index) => setCurrentIndex(index)}
+             onClose={() => setIsTreeOpen(false)}
+          />
+      )}
+
       {isConfigOpen && (
           <div className="absolute inset-0 z-[100] bg-black/80 backdrop-blur flex items-center justify-center p-4">
                <div className="bg-neutral-900 border border-neutral-700 w-full max-w-sm rounded shadow-2xl flex flex-col p-6 space-y-6">
@@ -579,7 +683,9 @@ export default function App() {
                      <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-500 to-blue-400 animate-gradient-text">Evolve</span>
                  </span>
                  <div className="h-4 w-px bg-neutral-800 hidden sm:block"></div>
-                 <div className="text-[9px] md:text-[10px] text-neutral-500 uppercase tracking-widest font-mono truncate">
+                 <div 
+                    onClick={() => setIsTreeOpen(true)}
+                    className="text-[9px] md:text-[10px] text-neutral-500 hover:text-white cursor-pointer uppercase tracking-widest font-mono truncate transition-colors px-2 py-1 bg-neutral-900 hover:bg-neutral-800 rounded border border-neutral-800">
                     {!hasStarted ? "" : (isSelectionMode ? "Gemini 3 Flash Live Coding" : `History: ${currentIndex + 1}/${history.length}`)}
                  </div>
             </div>
@@ -594,6 +700,22 @@ export default function App() {
                             className="h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700"
                         >
                             RANDOMIZE
+                        </button>
+                        <button 
+                            onClick={() => setIsExploreOpen(true)}
+                            title="Explore Community Gallery"
+                            className="h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-blue-900 bg-blue-900/20 hover:bg-blue-900/40 text-blue-300 transition-colors hidden md:flex items-center focus:outline-none focus:ring-2 focus:ring-blue-700 gap-1"
+                        >
+                            EXPLORE
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+                        </button>
+                        <button 
+                            onClick={toggleMic}
+                            title="Toggle Microphone for Audio-Reactive Spinners"
+                            className={`h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700 gap-1 ${micEnabled ? 'bg-red-900/40 text-red-400 border-red-900' : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300'}`}
+                        >
+                            {micEnabled ? 'MIC ON' : 'MIC OFF'}
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>
                         </button>
                         <button 
                             onClick={() => setIsConfigOpen(true)}
@@ -618,8 +740,22 @@ export default function App() {
                         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg>
                     </button>
                     
-                    <button 
-                        onClick={isSelectionMode ? undefined : actions.onMutate}
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto mt-2 sm:mt-0">
+                        <input
+                            type="text"
+                            value={userPrompt}
+                            onChange={(e) => setUserPrompt(e.target.value)}
+                            placeholder="Prompt: e.g. low-poly, neon fire..."
+                            disabled={isGenerating || !!exportState || isSelectionMode}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !isGenerating && !isSelectionMode) {
+                                    actions.onMutate();
+                                }
+                            }}
+                            className={`h-8 px-3 text-[10px] rounded border ${theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-300 text-black'} focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-48 transition-colors ${isSelectionMode ? 'opacity-50' : ''}`}
+                        />
+                        <button 
+                            onClick={isSelectionMode ? undefined : actions.onMutate}
                         disabled={isSelectionMode || isGenerating || !!exportState}
                         title="Generate next iteration based on the current spinner"
                         className={`
@@ -636,6 +772,7 @@ export default function App() {
                         }
                         {isSelectionMode && <span className="md:hidden">SELECT</span>}
                     </button>
+                    </div>
 
                     <button 
                         onClick={actions.onNext}
@@ -853,7 +990,44 @@ export default function App() {
             onDownloadSvgMain={() => canvasSingleRef.current?.downloadSvg('spinner_gen_' + (currentHistorySpinner?.id || 'export'))}
             onDownloadSvgA={() => canvasARef.current?.downloadSvg('spinner_a_' + (candidates?.a.data.id || 'export'))}
             onDownloadSvgB={() => canvasBRef.current?.downloadSvg('spinner_b_' + (candidates?.b.data.id || 'export'))}
+            onDownloadReactMain={() => handleExportCode('react', 'main')}
+            onDownloadReactA={() => handleExportCode('react', 'a')}
+            onDownloadReactB={() => handleExportCode('react', 'b')}
+            onDownloadCssMain={() => handleExportCode('css', 'main')}
+            onDownloadCssA={() => handleExportCode('css', 'a')}
+            onDownloadCssB={() => handleExportCode('css', 'b')}
+            onDownloadLottieMain={() => handleExportCode('lottie', 'main')}
+            onDownloadLottieA={() => handleExportCode('lottie', 'a')}
+            onDownloadLottieB={() => handleExportCode('lottie', 'b')}
+            onCodeEditMain={(newCode) => {
+                const newHistory = [...history];
+                if (newHistory[currentIndex]) {
+                    newHistory[currentIndex] = { ...newHistory[currentIndex], p5Code: newCode };
+                    setHistory(newHistory);
+                }
+            }}
+            onCodeEditA={(newCode) => {
+                if (candidates?.a) {
+                    setCandidates({ ...candidates, a: { ...candidates.a, data: { ...candidates.a.data, p5Code: newCode } } as typeof candidates.a });
+                }
+            }}
+            onCodeEditB={(newCode) => {
+                if (candidates?.b) {
+                    setCandidates({ ...candidates, b: { ...candidates.b, data: { ...candidates.b.data, p5Code: newCode } } as typeof candidates.b });
+                }
+            }}
         />
+
+        {/* CODE EXPORT OVERLAY */}
+        {codeExportStatus && (
+            <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-neutral-900 border border-neutral-800 p-6 rounded shadow-2xl text-center max-w-sm w-full mx-auto animate-in fade-in zoom-in duration-300">
+                    <div className="w-8 h-8 border-2 border-neutral-700 border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+                    <h3 className="text-white font-mono text-sm tracking-wider uppercase">{codeExportStatus}</h3>
+                    <p className="text-neutral-500 text-[10px] mt-2">Translating p5.js logic via Gemini...</p>
+                </div>
+            </div>
+        )}
 
         {/* LANDING OVERLAY */}
         {!hasStarted && (

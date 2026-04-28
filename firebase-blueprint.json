@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "Spinner": {
+      "title": "Spinner",
+      "description": "A saved generation of a spinner.",
+      "type": "object",
+      "properties": {
+        "p5Code": {
+          "type": "string",
+          "description": "The p5.js script content."
+        },
+        "mutationName": {
+          "type": "string"
+        },
+        "reasoning": {
+          "type": "string"
+        },
+        "creatorId": {
+          "type": "string",
+          "description": "The user ID of the creator."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp of creation."
+        },
+        "likesCount": {
+          "type": "number"
+        }
+      },
+      "required": ["p5Code", "mutationName", "creatorId", "createdAt", "likesCount"]
+    }
+  },
+  "firestore": {
+    "/spinners/{spinnerId}": {
+      "schema": {
+        "$ref": "#/entities/Spinner"
+      },
+      "description": "A collection of all community spinners."
+    }
+  }
+}

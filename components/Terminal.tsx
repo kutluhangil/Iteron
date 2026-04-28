@@ -7,6 +7,7 @@ import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { SpinnerData, CandidateState } from '../types';
 import { StatsChart } from './StatsChart';
 import { generateExportPack } from '../utils/exportService';
+import Editor from '@monaco-editor/react';
 
 // --- Helper Functions ---
 
@@ -62,6 +63,10 @@ interface TerminalPanelProps {
     allowInteraction?: boolean;
     onDownloadGif?: () => void;
     onDownloadSvg?: () => void;
+    onDownloadReact?: () => void;
+    onDownloadCss?: () => void;
+    onDownloadLottie?: () => void;
+    onCodeEdit?: (newCode: string) => void;
 }
 
 const TerminalPanel: React.FC<TerminalPanelProps> = ({
@@ -77,7 +82,11 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
     className = "",
     allowInteraction = true,
     onDownloadGif,
-    onDownloadSvg
+    onDownloadSvg,
+    onDownloadReact,
+    onDownloadCss,
+    onDownloadLottie,
+    onCodeEdit
 }) => {
     const [liveElapsed, setLiveElapsed] = useState(0);
     const [isCodeOpen, setIsCodeOpen] = useState(false);
@@ -229,6 +238,36 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
             <button 
                 onClick={(e) => {
                     e.stopPropagation();
+                    if (onDownloadReact) onDownloadReact();
+                }} 
+                disabled={!allowInteraction || isExporting || !onDownloadReact} 
+                className="hidden sm:flex items-center gap-1 px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50"
+            >
+                REACT
+            </button>
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDownloadCss) onDownloadCss();
+                }} 
+                disabled={!allowInteraction || isExporting || !onDownloadCss} 
+                className="hidden sm:flex items-center gap-1 px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50"
+            >
+                CSS
+            </button>
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
+                    if (onDownloadLottie) onDownloadLottie();
+                }} 
+                disabled={!allowInteraction || isExporting || !onDownloadLottie} 
+                className="hidden sm:flex items-center gap-1 px-2 py-0.5 md:py-1 text-[9px] uppercase font-medium bg-neutral-900 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-800 rounded transition-all active:scale-95 disabled:opacity-50"
+            >
+                LOTTIE
+            </button>
+            <button 
+                onClick={(e) => {
+                    e.stopPropagation();
                     if (onDownloadSvg) onDownloadSvg();
                 }} 
                 disabled={!allowInteraction || isExporting || !onDownloadSvg} 
@@ -293,12 +332,28 @@ const TerminalPanel: React.FC<TerminalPanelProps> = ({
                     </div>
                  </div>
 
-                 <pre 
-                    ref={codeScrollRef}
-                    className="flex-1 overflow-auto custom-scrollbar text-[10px] md:text-xs leading-relaxed text-neutral-400 font-mono whitespace-pre-wrap break-all p-4 md:px-8 bg-[#0a0a0a]"
-                 >
-                    <code>{codeToDisplay || "// Spinner code generating..."}</code>
-                </pre>
+                 <div className="flex-1 w-full bg-[#0a0a0a] relative">
+                     <Editor
+                         height="100%"
+                         language="javascript"
+                         theme="vs-dark"
+                         value={codeToDisplay || "// Spinner code generating..."}
+                         options={{
+                             minimap: { enabled: false },
+                             fontSize: 12,
+                             wordWrap: 'on',
+                             scrollBeyondLastLine: false,
+                             readOnly: isGenerating,
+                             padding: { top: 16, bottom: 16 },
+                             fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+                         }}
+                         onChange={(value) => {
+                             if (value && onCodeEdit && !isGenerating) {
+                                 onCodeEdit(value);
+                             }
+                         }}
+                     />
+                 </div>
             </div>
 
             {/* 
@@ -422,6 +477,18 @@ interface TerminalProps {
   onDownloadSvgMain?: () => void;
   onDownloadSvgA?: () => void;
   onDownloadSvgB?: () => void;
+  onDownloadReactMain?: () => void;
+  onDownloadReactA?: () => void;
+  onDownloadReactB?: () => void;
+  onDownloadCssMain?: () => void;
+  onDownloadCssA?: () => void;
+  onDownloadCssB?: () => void;
+  onDownloadLottieMain?: () => void;
+  onDownloadLottieA?: () => void;
+  onDownloadLottieB?: () => void;
+  onCodeEditMain?: (newCode: string) => void;
+  onCodeEditA?: (newCode: string) => void;
+  onCodeEditB?: (newCode: string) => void;
 }
 
 export const Terminal: React.FC<TerminalProps> = ({ 
@@ -439,7 +506,19 @@ export const Terminal: React.FC<TerminalProps> = ({
     onDownloadGifB,
     onDownloadSvgMain,
     onDownloadSvgA,
-    onDownloadSvgB
+    onDownloadSvgB,
+    onDownloadReactMain,
+    onDownloadReactA,
+    onDownloadReactB,
+    onDownloadCssMain,
+    onDownloadCssA,
+    onDownloadCssB,
+    onDownloadLottieMain,
+    onDownloadLottieA,
+    onDownloadLottieB,
+    onCodeEditMain,
+    onCodeEditA,
+    onCodeEditB
 }) => {
   return (
     <div className="flex flex-col h-full bg-[#0a0a0a] font-mono text-sm border-t border-neutral-800">
@@ -478,6 +557,10 @@ export const Terminal: React.FC<TerminalProps> = ({
                         allowInteraction={allowInteraction}
                         onDownloadGif={onDownloadGifA}
                         onDownloadSvg={onDownloadSvgA}
+                        onDownloadReact={onDownloadReactA}
+                        onDownloadCss={onDownloadCssA}
+                        onDownloadLottie={onDownloadLottieA}
+                        onCodeEdit={onCodeEditA}
                     />
                     <div className="w-px bg-neutral-900 flex-none z-10 hidden lg:block" />
                     <TerminalPanel 
@@ -494,6 +577,10 @@ export const Terminal: React.FC<TerminalProps> = ({
                         allowInteraction={allowInteraction}
                         onDownloadGif={onDownloadGifB}
                         onDownloadSvg={onDownloadSvgB}
+                        onDownloadReact={onDownloadReactB}
+                        onDownloadCss={onDownloadCssB}
+                        onDownloadLottie={onDownloadLottieB}
+                        onCodeEdit={onCodeEditB}
                     />
                 </>
             ) : (
@@ -510,6 +597,10 @@ export const Terminal: React.FC<TerminalProps> = ({
                     allowInteraction={allowInteraction}
                     onDownloadGif={onDownloadGifMain}
                     onDownloadSvg={onDownloadSvgMain}
+                    onDownloadReact={onDownloadReactMain}
+                    onDownloadCss={onDownloadCssMain}
+                    onDownloadLottie={onDownloadLottieMain}
+                    onCodeEdit={onCodeEditMain}
                 />
             )}
         </div>

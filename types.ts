@@ -5,6 +5,7 @@
 
 export interface SpinnerData {
   id: number;
+  parentId?: number;
   mutationName: string;
   reasoning: string;
   p5Code: string;
@@ -13,6 +14,9 @@ export interface SpinnerData {
   tokensPerSecond: number;
   totalTokens: number;
   tpsHistory: number[]; // Time series of TPS sampled every 100ms
+  reactCode?: string;
+  cssCode?: string;
+  lottieCode?: string;
 }
 
 export interface GenerationStats {

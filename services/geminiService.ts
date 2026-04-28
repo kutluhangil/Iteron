@@ -29,7 +29,8 @@ const responseSchema = {
 export const generateNextSpinner = async (
   previousCode: string | null,
   previousId: number,
-  onStreamUpdate: (text: string) => void
+  onStreamUpdate: (text: string) => void,
+  promptOverride?: string
 ): Promise<SpinnerData> => {
   const startTime = performance.now();
   const apiKey = process.env.API_KEY;
@@ -83,11 +84,19 @@ export const generateNextSpinner = async (
     
     8. SYNTAX: Do not wrap the code in markdown blocks (\`\`\`). Do not wrap the code in a closure. Just return the executable lines to go inside the wrapper function.
     9. FORMATTING: Use 2-space indentation and newlines to make the code readable in a pre-formatted block. Do not minify.
+    10. AUDIO: If the user instruction mentions audio/sound/mic, you can use 'window.p5AudioMic' which is automatically initialized in the environment. It is a 'p5.AudioIn' instance. Example: 'let level = window.p5AudioMic ? window.p5AudioMic.getLevel() : 0.5;'
   `;
 
-  const prompt = previousCode 
-    ? `PREVIOUS SPINNER CODE:\n${previousCode}\n\nINSTRUCTION: take one component from the spinner that you like, to develop the next one.`
-    : `INSTRUCTION: Generate the Progenitor (Gen 1). A pure, minimal geometric loop.`;
+  let prompt = "";
+  if (promptOverride) {
+      prompt = previousCode
+        ? `PREVIOUS SPINNER CODE:\n${previousCode}\n\nUSER OVERRIDE INSTRUCTION: ${promptOverride}`
+        : `USER OVERRIDE INSTRUCTION: ${promptOverride}`;
+  } else {
+      prompt = previousCode 
+        ? `PREVIOUS SPINNER CODE:\n${previousCode}\n\nINSTRUCTION: take one component from the spinner that you like, to develop the next one.`
+        : `INSTRUCTION: Generate the Progenitor (Gen 1). A pure, minimal geometric loop.`;
+  }
 
   let fullText = "";
 
@@ -133,6 +142,63 @@ export const generateNextSpinner = async (
 
   } catch (error) {
     console.error("Generation failed:", error);
+    throw error;
+  }
+};
+
+export const convertSpinnerFormat = async (
+  p5Code: string,
+  targetFormat: 'react' | 'css' | 'lottie',
+  onStreamUpdate: (text: string) => void
+): Promise<string> => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) throw new Error("API Key not found in environment variables");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  let systemInstruction = "";
+  if (targetFormat === 'react') {
+      systemInstruction = `
+        You are an expert React and Tailwind CSS developer. Convert the provided p5.js loading spinner animation into a visually equivalent pure React component using inline styles or Tailwind CSS. 
+        You CANNOT use canvas, p5.js, or any external animation libraries. You must use DOM elements (div, svg) and CSS animations (keyframes, transitions) or framer-motion if necessary, but strictly prefer plain Tailwind or inline CSS.
+        Return ONLY the React Component code (using TypeScript). Do not include JSON formatting or markdown wrapping. Just the raw code.
+      `;
+  } else if (targetFormat === 'css') {
+      systemInstruction = `
+        You are an expert CSS developer. Convert the provided p5.js loading spinner animation into visually equivalent pure CSS keyframes and HTML structure.
+        Return ONLY the HTML and CSS code combined. Use an <style> tag for the CSS. Do not include JSON formatting or markdown wrapping. Just the raw code.
+      `;
+  } else {
+      systemInstruction = `
+        You are an expert motion designer. Convert the provided p5.js loading spinner animation into a visually equivalent Lottie JSON file structure.
+        Return ONLY the raw JSON output. Do not include javascript, do not wrap in markdown or json blocks. The output must be valid parsed JSON. Use standard Lottie schema.
+      `;
+  }
+
+  let fullText = "";
+
+  try {
+    const responseStream = await ai.models.generateContentStream({
+      model: "gemini-2.5-pro",
+      contents: [
+         { role: "user", parts: [{ text: `Convert this p5.js code to ${targetFormat}:\n\n${p5Code}` }]}
+      ],
+      config: {
+        systemInstruction,
+        temperature: 0.2, // Low temp for robust translation
+      }
+    });
+
+    for await (const chunk of responseStream) {
+      if (chunk.text) {
+          fullText += chunk.text();
+          onStreamUpdate(fullText.replace(/```(javascript|typescript|tsx|jsx|html|css)?\n?/g, '').replace(/```\n?/g, ''));
+      }
+    }
+
+    return fullText.replace(/```(javascript|typescript|tsx|jsx|html|css)?\n?/g, '').replace(/```\n?/g, '');
+  } catch (error) {
+    console.error(`Conversion to ${targetFormat} failed`, error);
     throw error;
   }
 };

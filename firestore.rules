@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidString(val, maxLen) {
+      return val is string && val.size() > 0 && val.size() <= maxLen;
+    }
+
+    function isValidSpinner(data) {
+      return data.keys().hasAll(['p5Code', 'mutationName', 'reasoning', 'creatorId', 'createdAt', 'likesCount']) 
+          && data.keys().size() == 6
+          && isValidString(data.p5Code, 50000)
+          && isValidString(data.mutationName, 200)
+          && isValidString(data.reasoning, 2000)
+          && data.creatorId == request.auth.uid
+          && data.createdAt == request.time
+          && data.likesCount == 0;
+    }
+
+    match /spinners/{spinnerId} {
+      allow read: if true;
+      allow create: if request.auth != null && isValidSpinner(request.resource.data);
+      allow update: if request.auth != null 
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount'])
+                    && request.resource.data.likesCount is number
+                    && request.resource.data.likesCount == resource.data.likesCount + 1;
+    }
+  }
+}

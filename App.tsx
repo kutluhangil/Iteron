@@ -148,6 +148,29 @@ export default function App() {
   const [userPrompt, setUserPrompt] = useState('');
   const [presets, setPresets] = useState<SpinnerData[]>([]);
   const [micEnabled, setMicEnabled] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSyncEnabled, setIsSyncEnabled] = useState(true);
+
+  // Toggle fullscreen
+  const toggleFullscreen = () => {
+      if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch(err => {
+              console.error(`Error attempting to enable fullscreen mode: ${err.message}`);
+          });
+      } else {
+          if (document.exitFullscreen) {
+              document.exitFullscreen();
+          }
+      }
+  };
+
+  useEffect(() => {
+      const handleFullscreenChange = () => {
+          setIsFullscreen(!!document.fullscreenElement);
+      };
+      document.addEventListener('fullscreenchange', handleFullscreenChange);
+      return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
 
   const toggleMic = async () => {
     if (!micEnabled) {
@@ -363,6 +386,9 @@ export default function App() {
       winnerData.parentId = activeSeedId;
 
       playClickSound(); // Sound effect on selection
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(50);
+      }
 
       setSelectedVariant(variant);
       
@@ -679,8 +705,8 @@ export default function App() {
       <div className="flex-none h-14 flex items-center justify-between px-3 md:px-4 bg-black border-b border-neutral-900 z-20">
             <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0 mr-2">
                  <span className="font-bold tracking-tight text-xs sm:text-sm hidden sm:inline-block">
-                     <span className="text-neutral-100">Spinner</span>
-                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-500 to-blue-400 animate-gradient-text">Evolve</span>
+                     <span className="text-neutral-100">Iter</span>
+                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-500 to-blue-400 animate-gradient-text">on</span>
                  </span>
                  <div className="h-4 w-px bg-neutral-800 hidden sm:block"></div>
                  <div 
@@ -690,7 +716,9 @@ export default function App() {
                  </div>
             </div>
 
-            {hasStarted && (
+            {hasStarted && (() => {
+                const isPromptValid = userPrompt.trim().length > 0 && userPrompt.trim().length <= 250;
+                return (
                 <div className="flex gap-2 flex-none">
                     {!isGenerating && !isSelectionMode && (
                         <>
@@ -701,6 +729,22 @@ export default function App() {
                         >
                             RANDOMIZE
                         </button>
+                        <button 
+                            onClick={toggleFullscreen}
+                            title="Toggle Fullscreen"
+                            className="h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700"
+                        >
+                            {isFullscreen ? 'EXIT FULLSCREEN' : 'FULLSCREEN'}
+                        </button>
+                        {isSelectionMode && (
+                        <button 
+                            onClick={() => setIsSyncEnabled(!isSyncEnabled)}
+                            title="Toggle Timeline Scrub Syncing"
+                            className={`h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border border-neutral-800 transition-colors hidden sm:flex items-center focus:outline-none focus:ring-2 focus:ring-neutral-700 ${isSyncEnabled ? 'bg-blue-900/40 text-blue-400 border-blue-900' : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300'}`}
+                        >
+                            {isSyncEnabled ? 'SYNC: ON' : 'SYNC: OFF'}
+                        </button>
+                        )}
                         <button 
                             onClick={() => setIsExploreOpen(true)}
                             title="Explore Community Gallery"
@@ -748,15 +792,15 @@ export default function App() {
                             placeholder="Prompt: e.g. low-poly, neon fire..."
                             disabled={isGenerating || !!exportState || isSelectionMode}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !isGenerating && !isSelectionMode) {
+                                if (e.key === 'Enter' && !isGenerating && !isSelectionMode && isPromptValid) {
                                     actions.onMutate();
                                 }
                             }}
                             className={`h-8 px-3 text-[10px] rounded border ${theme === 'dark' ? 'bg-neutral-900 border-neutral-800 text-neutral-300' : 'bg-white border-neutral-300 text-black'} focus:outline-none focus:ring-2 focus:ring-blue-500 w-full sm:w-48 transition-colors ${isSelectionMode ? 'opacity-50' : ''}`}
                         />
                         <button 
-                            onClick={isSelectionMode ? undefined : actions.onMutate}
-                        disabled={isSelectionMode || isGenerating || !!exportState}
+                            onClick={isSelectionMode || !isPromptValid ? undefined : actions.onMutate}
+                        disabled={isSelectionMode || isGenerating || !!exportState || !isPromptValid}
                         title="Generate next iteration based on the current spinner"
                         className={`
                             h-8 px-3 md:px-4 font-bold text-[9px] md:text-[10px] uppercase rounded border transition-all duration-300 tracking-wider flex items-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-black
@@ -796,7 +840,8 @@ export default function App() {
                         </button>
                     )}
                 </div>
-            )}
+                );
+            })()}
       </div>
 
       {/* VISUALS */}
@@ -808,10 +853,12 @@ export default function App() {
       >
         {!isSelectionMode ? (
             // SINGLE VIEW
-            <div className="w-full h-full relative flex items-center justify-center">
-                <ErrorBoundary onReset={actions.onMutate}>
-                    <P5Canvas ref={canvasSingleRef} code={currentHistorySpinner?.p5Code || ""} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
-                </ErrorBoundary>
+            <div className="w-full h-full relative flex items-center justify-center perspective-[1000px]">
+                <div className="shadow-[0_20px_40px_-10px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(255,255,255,0.05)] hover:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.9),inset_0_0_30px_rgba(255,255,255,0.1)] border border-white/5 rounded-3xl transform transition-all duration-500 hover:scale-[1.03] overflow-hidden" style={{ aspectRatio, width: '100%', maxWidth: '80vh', maxHeight: '80vh' }}>
+                    <ErrorBoundary onReset={actions.onMutate}>
+                        <P5Canvas ref={canvasSingleRef} code={currentHistorySpinner?.p5Code || ""} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
+                    </ErrorBoundary>
+                </div>
                 
                 {/* Playback Controls Overlay */}
                 <div className="absolute bottom-4 left-4 flex gap-2 z-20 items-center">
@@ -910,10 +957,12 @@ export default function App() {
                     )}
 
                     {candidates?.a.data ? (
-                         <div className="w-full h-full flex items-center justify-center p-4 md:p-8 transition-all duration-500 group-hover:scale-105 group-focus-visible:scale-105 group-hover:opacity-40 group-focus-visible:opacity-40">
-                             <ErrorBoundary onReset={actions.onMutate}>
-                                 <P5Canvas ref={canvasARef} code={candidates.a.data.p5Code} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
-                             </ErrorBoundary>
+                         <div className="w-full h-full flex items-center justify-center p-4 md:p-8 transition-all duration-500 perspective-[1000px]">
+                             <div className="w-full h-full flex items-center justify-center relative shadow-[0_20px_40px_-10px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(255,255,255,0.05)] group-hover:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.9),inset_0_0_30px_rgba(255,255,255,0.1)] border border-white/5 rounded-3xl overflow-hidden transition-all duration-500 group-hover:scale-[1.03]">
+                                 <ErrorBoundary onReset={actions.onMutate}>
+                                     <P5Canvas id="variant-a" ref={canvasARef} code={candidates.a.data.p5Code} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} enableSync={isSyncEnabled} />
+                                 </ErrorBoundary>
+                             </div>
                          </div>
                     ) : (
                          // Fallback loader
@@ -954,10 +1003,12 @@ export default function App() {
                     )}
 
                     {candidates?.b.data ? (
-                         <div className="w-full h-full flex items-center justify-center p-4 md:p-8 transition-all duration-500 group-hover:scale-105 group-focus-visible:scale-105 group-hover:opacity-40 group-focus-visible:opacity-40">
-                             <ErrorBoundary onReset={actions.onMutate}>
-                                 <P5Canvas ref={canvasBRef} code={candidates.b.data.p5Code} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} />
-                             </ErrorBoundary>
+                         <div className="w-full h-full flex items-center justify-center p-4 md:p-8 transition-all duration-500 perspective-[1000px]">
+                             <div className="w-full h-full flex items-center justify-center relative shadow-[0_20px_40px_-10px_rgba(0,0,0,0.8),inset_0_0_20px_rgba(255,255,255,0.05)] group-hover:shadow-[0_40px_80px_-20px_rgba(0,0,0,0.9),inset_0_0_30px_rgba(255,255,255,0.1)] border border-white/5 rounded-3xl overflow-hidden transition-all duration-500 group-hover:scale-[1.03]">
+                                 <ErrorBoundary onReset={actions.onMutate}>
+                                     <P5Canvas id="variant-b" ref={canvasBRef} code={candidates.b.data.p5Code} speed={isPlaying ? speed : 0} hueShift={hueShift} aspectRatio={aspectRatio} enableSync={isSyncEnabled} />
+                                 </ErrorBoundary>
+                             </div>
                          </div>
                     ) : (
                          !isGenerating && (
@@ -1034,7 +1085,7 @@ export default function App() {
             <div className="absolute inset-0 bg-black/90 backdrop-blur-sm flex flex-col items-center justify-center text-center p-6 z-50 border-t border-neutral-800">
                 <div className="animate-in fade-in zoom-in duration-700 slide-in-from-bottom-4 flex flex-col items-center">
                     <h1 className="text-4xl md:text-6xl font-bold text-white mb-4 tracking-tighter max-w-4xl leading-none">
-                        SPINNER <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-500 to-blue-400 animate-gradient-text">EVOLVE</span>
+                        Iter<span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-purple-500 to-blue-400 animate-gradient-text">on</span>
                     </h1>
                     
                     <p className="text-sm md:text-base text-neutral-400 max-w-xl mb-8 leading-relaxed font-light">

@@ -20,10 +20,12 @@ export interface P5CanvasRef {
 }
 
 interface P5CanvasProps {
+  id?: string;
   code: string;
   speed?: number;
   hueShift?: number;
   aspectRatio?: number; // width / height
+  enableSync?: boolean;
 }
 
 export const CursorTrail = () => {
@@ -87,11 +89,12 @@ export const CursorTrail = () => {
     return <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none z-[100]" />;
 };
 
-export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 1, hueShift = 0, aspectRatio = 1 }, ref) => {
+export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ id, code, speed = 1, hueShift = 0, aspectRatio = 1, enableSync = false }, ref) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const p5InstanceRef = useRef<any>(null);
   const speedRef = useRef(speed);
+  const scrubOffsetRef = useRef(0);
   const resetFnRef = useRef<(() => void) | null>(null);
   const [scale, setScale] = useState(1);
   const [userZoom, setUserZoom] = useState(1);
@@ -105,6 +108,23 @@ export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 
   useEffect(() => {
      speedRef.current = speed;
   }, [speed]);
+
+  useEffect(() => {
+     const onScrub = (e: Event) => {
+         const detail = (e as CustomEvent).detail;
+         // Handle scrub
+         if (detail.scrub !== undefined && (enableSync || detail.sourceId === id)) {
+             scrubOffsetRef.current += detail.scrub;
+         }
+         // Handle pan and zoom sync
+         if (enableSync && detail.sourceId !== id) {
+             if (detail.zoom !== undefined) setUserZoom(detail.zoom);
+             if (detail.pan !== undefined) setPan(detail.pan);
+         }
+     };
+     window.addEventListener('spinnerScrub', onScrub);
+     return () => window.removeEventListener('spinnerScrub', onScrub);
+  }, [enableSync, id]);
 
   useImperativeHandle(ref, () => ({
     downloadGif: () => {
@@ -223,9 +243,10 @@ export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 
         
         resetFnRef.current = () => {
             internalMillis = 0;
+            scrubOffsetRef.current = 0;
         };
         
-        p.millis = () => internalMillis;
+        p.millis = () => Math.max(0, internalMillis + scrubOffsetRef.current);
 
         p.setup = () => {
           p.createCanvas(virtualWidth, virtualHeight);
@@ -280,12 +301,14 @@ export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 
         p5InstanceRef.current.remove();
       }
     };
-  }, [code]);
+  }, [code, aspectRatio]);
 
   const handleWheel = (e: React.WheelEvent) => {
       // Zoom
       const zoomSensitivity = 0.002;
-      setUserZoom(z => Math.max(0.1, Math.min(10, z - e.deltaY * zoomSensitivity)));
+      const newZoom = Math.max(0.1, Math.min(10, userZoom - e.deltaY * zoomSensitivity));
+      setUserZoom(newZoom);
+      window.dispatchEvent(new CustomEvent('spinnerScrub', { detail: { sourceId: id, zoom: newZoom, pan }}));
   };
 
   const activePointers = useRef(new Map<number, React.PointerEvent>());
@@ -317,13 +340,26 @@ export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 
       if (activePointers.current.size === 1 && isDragging.current) {
           const dx = e.clientX - lastMouse.current.x;
           const dy = e.clientY - lastMouse.current.y;
-          setPan(p => ({ x: p.x + dx / (scale * userZoom), y: p.y + dy / (scale * userZoom) }));
+          
+          let updatedPan = pan;
+          // Scrub timeline if panning horizontally (e.g., holding shift, or just purely horizontal dx > dy)
+          // For simplicity, we make horizontal movement scrub, and vertical movement pan OR we just make all drag scrub
+          // Let's do horizontal movement = scrub, vertical = pan.
+          if (Math.abs(dx) > Math.abs(dy)) {
+              window.dispatchEvent(new CustomEvent('spinnerScrub', { detail: { sourceId: id, scrub: dx * 15 } }));
+          } else {
+              updatedPan = { x: pan.x, y: pan.y + dy / (scale * userZoom) };
+              setPan(updatedPan);
+              window.dispatchEvent(new CustomEvent('spinnerScrub', { detail: { sourceId: id, pan: updatedPan, zoom: userZoom } }));
+          }
           lastMouse.current = { x: e.clientX, y: e.clientY };
       } else if (activePointers.current.size === 2 && initialPinchDist.current) {
           const pts = Array.from(activePointers.current.values());
           const dist = Math.hypot(pts[0].clientX - pts[1].clientX, pts[0].clientY - pts[1].clientY);
           const zoomFactor = dist / initialPinchDist.current;
-          setUserZoom(Math.max(0.1, Math.min(10, initialZoom.current * zoomFactor)));
+          const newZoom = Math.max(0.1, Math.min(10, initialZoom.current * zoomFactor));
+          setUserZoom(newZoom);
+          window.dispatchEvent(new CustomEvent('spinnerScrub', { detail: { sourceId: id, zoom: newZoom, pan }}));
       }
   };
 
@@ -348,6 +384,7 @@ export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 
   const handleDoubleClick = () => {
       setUserZoom(1);
       setPan({ x: 0, y: 0 });
+      window.dispatchEvent(new CustomEvent('spinnerScrub', { detail: { sourceId: id, zoom: 1, pan: {x: 0, y: 0} }}));
   };
 
   return (
@@ -365,12 +402,12 @@ export const P5Canvas = forwardRef<P5CanvasRef, P5CanvasProps>(({ code, speed = 
         <CursorTrail />
         {isInteracting && (
             <div className="absolute top-4 left-4 z-40 bg-black/60 backdrop-blur text-white text-[10px] font-mono px-2 py-1 rounded shadow pointer-events-none">
-                Pan: {Math.round(pan.x)}, {Math.round(pan.y)} | Zoom: {userZoom.toFixed(2)}x
+                Scrubbing Timeline | Zoom: {userZoom.toFixed(2)}x
             </div>
         )}
         <div 
           ref={canvasRef}
-          className={`transition-all duration-300 ease-out ${isInteracting ? 'cursor-grabbing ring-2 ring-white/30 rounded-lg shadow-2xl' : 'cursor-move'}`}
+          className={`transition-all duration-300 ease-out ${isInteracting ? 'cursor-ew-resize ring-2 ring-white/30 rounded-lg shadow-2xl' : 'cursor-ew-resize'}`}
           style={{ 
             width: `${virtualWidth}px`, 
             height: `${virtualHeight}px`, 

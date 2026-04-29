@@ -61,6 +61,7 @@ export const generateNextSpinner = async (
        - IMPORTANT: Maximize the use of space. Fill the canvas.
        - Keep drawing elements within a 380x380 pixel safe zone centered on the canvas (Radius 190px).
        - Do not leave excessive empty space around the edges.
+       - IMPORTANT: Analyze the color palette and ensure WCAG AA contrast ratios for all elements against standard light (white) and dark (black/#080808) backgrounds. If generating dark or pastel colors, ensure they don't blend into the background. Avoid low-contrast color combinations.
     
     4. CONTINUOUS ANIMATION:
        - The animation should be continuous, seamless, and hypnotic.

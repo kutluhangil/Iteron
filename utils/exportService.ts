@@ -55,7 +55,7 @@ ScriptFile=${name}.script
 // Helper to create Chrome Extension manifest
 const generateChromeManifest = () => JSON.stringify({
   "manifest_version": 3,
-  "name": "Spinner Evolve Custom Cursor",
+  "name": "Iteron Custom Cursor",
   "version": "1.0",
   "description": "Replaces the default cursor with an evolved AI spinner.",
   "permissions": ["activeTab", "scripting"],

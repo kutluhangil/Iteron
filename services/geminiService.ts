@@ -192,7 +192,7 @@ export const convertSpinnerFormat = async (
 
     for await (const chunk of responseStream) {
       if (chunk.text) {
-          fullText += chunk.text();
+          fullText += chunk.text;
           onStreamUpdate(fullText.replace(/```(javascript|typescript|tsx|jsx|html|css)?\n?/g, '').replace(/```\n?/g, ''));
       }
     }

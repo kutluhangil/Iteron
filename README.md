@@ -71,16 +71,18 @@ No prompt-and-pray. Just generate, compare, evolve.
 
 ## 🖼️ Screenshots
 
-> Drop your captures into `docs/screenshots/` — the table below wires them up automatically.
-
 <div align="center">
+
+<img src="docs/screenshots/ab-test.png" width="100%" alt="A/B live coding view" />
+
+**A/B Live Coding** — Gemini 3 Flash streams two candidate spinners side-by-side, each with live tokens/sec, generation time, and a TPS history chart. Pick a winner to seed the next generation.
+
+<br />
 
 | | |
 |:---:|:---:|
-| <img src="docs/screenshots/studio.png" width="100%" /> | <img src="docs/screenshots/ab-test.png" width="100%" /> |
-| **Studio** — Generate & inspect a spinner | **A/B Test** — Two candidates, one winner |
-| <img src="docs/screenshots/tree.png" width="100%" /> | <img src="docs/screenshots/export.png" width="100%" /> |
-| **Evolution Tree** — Full mutation lineage | **Export** — React · CSS · Lottie · cursors |
+| <img src="docs/screenshots/studio.png" width="100%" alt="Landing / hero" /> | <img src="docs/screenshots/mobile.png" width="62%" alt="Mobile responsive view" /> |
+| **Landing** — Hero with the live Progenitor spinner | **Mobile** — Swipeable single-variant layout |
 
 </div>
 
